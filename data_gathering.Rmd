@@ -1,0 +1,123 @@
+---
+title: "R Notebook"
+output: NA
+---
+
+
+
+```{r setup}
+library(maps)
+library(tidyverse)
+library(GSODR)
+library(janitor)
+library(lubridate)
+library(purrr)
+```
+
+```{r}
+load(system.file("extdata", "isd_history.rda", package = "GSODR"))
+```
+
+```{r}
+detect_float <- function(vec){
+  vec <- str_to_lower(vec)
+  is_buoy <- str_detect(vec, "buoy")
+  is_platform <- str_detect(vec, "platform")
+  is_buoy | is_platform
+}
+
+uk_observation_points <-
+  isd_history %>%
+  clean_names() %>% 
+  filter(str_detect(country_name, "UNITED KINGDOM")) %>% 
+  filter(lat > 48) %>% 
+  filter(lon > -10) %>% 
+  mutate_at(vars(begin, end), ymd) %>% 
+  mutate_at(vars(name), str_to_title) %>% 
+  mutate(is_float = detect_float(name)) %>% 
+  filter(is_float == FALSE,
+         year(end) >= 2018,
+         year(begin) <= (2018 - 15)) #%>% 
+  # filter(lon > 0,
+  #        lat > 56)
+
+uk_observation_points
+```
+
+
+```{r}
+uk_map <- map_data(map = "world", region = "UK")
+
+ggplot() +
+  geom_polygon(data = uk_map, aes(x = long, y = lat, group = group)) +
+  geom_point(data = uk_observation_points, 
+             aes(x = lon, y = lat, color = is_float),
+             #color = "red"
+             size = 1) +
+  coord_map()
+```
+
+```{r}
+stations_with_weather_data <- 
+  uk_observation_points %>% 
+  # filter(name == "Lerwick"|
+  #          str_detect(name, "London")) %>% 
+  head(15) %>% 
+  #mutate(years_with_data = map2(year(begin), year(end), `:`)) %>% 
+  mutate(years_with_data = map2(2003, 2018, `:`)) %>% 
+  mutate(weather_data = map2(years_with_data, stnid, get_GSOD)) %>% 
+  select(stnid, name, weather_data)
+
+stations_with_weather_data
+```
+
+
+```{r}
+uk_weather_data <-
+  stations_with_weather_data %>% 
+  mutate(weather_data = purrr::map(weather_data, 
+                            as_tibble)) %>% 
+  mutate(weather_data = purrr::map(weather_data,
+                                   mutate_if,
+                                   is.integer,
+                                   as.character)) %>% 
+  unnest(weather_data) %>%
+  as_tibble() %>%
+  select(stnid,
+         name,
+         YEARMODA,
+         TEMP,
+         TEMP_ATTRIBUTES,
+         DEWP,
+         DEWP_ATTRIBUTES,
+         MAX,
+         MAX_ATTRIBUTES,
+         MIN,
+         MIN_ATTRIBUTES,
+         PRCP,
+         PRCP_ATTRIBUTES,
+         I_RAIN_DRIZZLE,
+         I_SNOW_ICE,
+         I_HAIL,
+         RH) %>%
+  clean_names()
+
+uk_weather_data 
+```
+
+```{r}
+uk_weather_data %>% 
+  mutate(station_name = name,
+         observation_date = yearmoda,
+         week_of_year = week(observation_date),
+         year = year(observation_date)) %>% 
+  group_by(week_of_year, station_name) %>% 
+  summarise(median_weekly_max = median(max, na.rm = T)) %>% 
+  ungroup() %>% 
+  ggplot(aes(x = week_of_year, 
+             y = median_weekly_max,
+             #group = year,
+             color = station_name)) +
+  geom_line()
+```
+
