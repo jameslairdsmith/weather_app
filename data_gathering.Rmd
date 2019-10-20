@@ -62,7 +62,7 @@ stations_with_weather_data <-
   uk_observation_points %>% 
   # filter(name == "Lerwick"|
   #          str_detect(name, "London")) %>% 
-  head(15) %>% 
+  #head(15) %>% 
   #mutate(years_with_data = map2(year(begin), year(end), `:`)) %>% 
   mutate(years_with_data = map2(2003, 2018, `:`)) %>% 
   mutate(weather_data = map2(years_with_data, stnid, get_GSOD)) %>% 
@@ -104,6 +104,54 @@ uk_weather_data <-
 
 uk_weather_data 
 ```
+
+```{r}
+write_csv(uk_weather_data,
+          path = "uk_weather_data.csv")
+```
+
+
+```{r}
+uk_summary_weather_data <- 
+  uk_weather_data %>% 
+  ungroup() %>% 
+  mutate(week_of_year = week(yearmoda),
+         year = year(yearmoda),
+         rain_day = if_else(prcp > 0, 1, 0)) %>% 
+  group_by(stnid, name, week_of_year, year) %>% 
+  summarise(median_max_temp = median(max, na.rm = T),
+            total_rain_days = sum(rain_day, na.rm = T)) %>% 
+  group_by(stnid, name, week_of_year) %>% 
+  summarise(mean_max_temp = mean(median_max_temp, na.rm = T),
+            mean_rain_days = mean(total_rain_days, na.rm = T))
+
+uk_summary_weather_data
+```
+
+```{r}
+annual_high_temps <-
+  uk_summary_weather_data %>% 
+  group_by(stnid, name) %>% 
+  summarise(annual_mean_max_temp = max(mean_max_temp, na.rm = T)) %>% 
+  inner_join(uk_observation_points,
+             by = c("stnid" = "stnid")) %>% 
+  filter(name.x != "Bracknell/Beaufort")
+
+annual_high_temps %>% 
+  arrange(desc(annual_mean_max_temp))
+```
+
+```{r}
+ggplot() +
+  geom_polygon(data = uk_map, aes(x = long, y = lat, group = group)) +
+  geom_point(data = annual_high_temps, 
+             aes(x = lon, y = lat, color = annual_mean_max_temp),
+             #color = "red"
+             size = 1) +
+  scale_color_distiller(type = "div", palette = "RdYlGn") +
+  coord_map()
+```
+
 
 ```{r}
 uk_weather_data %>% 
